@@ -83,6 +83,7 @@ type TxContext struct {
 	ChainID     Hash
 	BaseFee     Hash
 	BlobBaseFee Hash
+	BlobHashes  []Hash
 }
 
 type HostContext interface {
@@ -186,8 +187,8 @@ func getTxContext(pCtx unsafe.Pointer) C.struct_evmc_tx_context {
 		evmcBytes32(txContext.ChainID),
 		evmcBytes32(txContext.BaseFee),
 		evmcBytes32(txContext.BlobBaseFee),
-		nil, // TODO: Add support for blob hashes.
-		0,
+		evmcBytes32_ptr(txContext.BlobHashes),
+		C.size_t(len(txContext.BlobHashes)),
 		nil, // TODO: Add support for transaction initcodes.
 		0,
 	}

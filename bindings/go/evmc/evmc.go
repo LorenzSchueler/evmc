@@ -90,13 +90,16 @@ static struct evmc_step_result step_n_wrapper(struct evmc_vm_steppable* vm,
 
     struct evmc_host_context* context = (struct evmc_host_context*)context_index;
     return evmc_step_n(vm, &evmc_go_host, context, rev, &msg, code, code_size, status,
-                       pc, gas_refunds, stack, stack_size, memory, memory_size, last_call_return_data, last_call_return_data_size, steps);
+                       pc, gas_refunds, stack, stack_size, memory, memory_size,
+					   last_call_return_data, last_call_return_data_size,
+					   steps);
 }
 */
 import "C"
 
 import (
 	"fmt"
+	"runtime"
 	"sync"
 	"unsafe"
 )
@@ -391,6 +394,12 @@ func (vm *VMSteppable) StepN(params StepParameters) (res StepResult, err error) 
 		stack = (*C.evmc_uint256be)(unsafe.Pointer(&params.Stack[0]))
 	}
 
+	pnr := new(runtime.Pinner)
+	pnr.Pin(&params.Context.GetTxContext().BlobHashes[0])
+	defer func() {
+		pnr.Unpin()
+	}()
+
 	memory := (*C.uint8_t)(nil)
 	if len(params.Memory) > 0 {
 		memory = (*C.uint8_t)(unsafe.Pointer(&params.Memory[0]))
@@ -476,6 +485,13 @@ func evmcBytes32(in Hash) C.evmc_bytes32 {
 		out.bytes[i] = C.uint8_t(in[i])
 	}
 	return out
+}
+
+func evmcBytes32_ptr(in []Hash) *C.evmc_bytes32 {
+	if len(in) == 0 {
+		return nil
+	}
+	return (*C.evmc_bytes32)(unsafe.Pointer(&in[0]))
 }
 
 func evmcAddress(address Address) C.evmc_address {
