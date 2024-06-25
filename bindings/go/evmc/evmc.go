@@ -302,6 +302,13 @@ func (vm *VM) Execute(ctx HostContext, rev Revision,
 		cCodeHash = &hash
 	}
 
+	txBlobHashes := ctx.GetTxContext().BlobHashes
+	if len(txBlobHashes) > 0 {
+		pnr := new(runtime.Pinner)
+		pnr.Pin(&txBlobHashes[0])
+		defer pnr.Unpin()
+	}
+
 	// FIXME: Clarify passing by pointer vs passing by value.
 	evmcRecipient := evmcAddress(recipient)
 	evmcSender := evmcAddress(sender)
@@ -389,16 +396,17 @@ func (vm *VMSteppable) StepN(params StepParameters) (res StepResult, err error) 
 		codeHash = &hash
 	}
 
+	txBlobhashes := params.Context.GetTxContext().BlobHashes
+	if len(txBlobhashes) > 0 {
+		pnr := new(runtime.Pinner)
+		pnr.Pin(&txBlobhashes[0])
+		defer pnr.Unpin()
+	}
+
 	stack := (*C.evmc_uint256be)(nil)
 	if len(params.Stack) > 0 {
 		stack = (*C.evmc_uint256be)(unsafe.Pointer(&params.Stack[0]))
 	}
-
-	pnr := new(runtime.Pinner)
-	pnr.Pin(&params.Context.GetTxContext().BlobHashes[0])
-	defer func() {
-		pnr.Unpin()
-	}()
 
 	memory := (*C.uint8_t)(nil)
 	if len(params.Memory) > 0 {
@@ -485,13 +493,6 @@ func evmcBytes32(in Hash) C.evmc_bytes32 {
 		out.bytes[i] = C.uint8_t(in[i])
 	}
 	return out
-}
-
-func evmcBytes32_ptr(in []Hash) *C.evmc_bytes32 {
-	if len(in) == 0 {
-		return nil
-	}
-	return (*C.evmc_bytes32)(unsafe.Pointer(&in[0]))
 }
 
 func evmcAddress(address Address) C.evmc_address {
