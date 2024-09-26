@@ -12,6 +12,8 @@
 mod container;
 mod types;
 
+use std::slice;
+
 pub use container::{EvmcContainer, SteppableEvmcContainer};
 pub use evmc_sys as ffi;
 pub use types::*;
@@ -85,18 +87,18 @@ pub struct StepResult {
 
 /// EVMC execution message structure.
 #[derive(Debug)]
-pub struct ExecutionMessage {
+pub struct ExecutionMessage<'a> {
     kind: MessageKind,
     flags: u32,
     depth: i32,
     gas: i64,
     recipient: Address,
     sender: Address,
-    input: Option<Vec<u8>>,
+    input: Option<&'a [u8]>,
     value: Uint256,
     create2_salt: Bytes32,
     code_address: Address,
-    code: Option<Vec<u8>>,
+    code: Option<&'a [u8]>,
     code_hash: Option<Uint256>,
 }
 
@@ -238,7 +240,7 @@ impl StepResult {
     }
 }
 
-impl ExecutionMessage {
+impl<'a> ExecutionMessage<'a> {
     pub fn new(
         kind: MessageKind,
         flags: u32,
@@ -246,11 +248,11 @@ impl ExecutionMessage {
         gas: i64,
         recipient: Address,
         sender: Address,
-        input: Option<&[u8]>,
+        input: Option<&'a [u8]>,
         value: Uint256,
         create2_salt: Bytes32,
         code_address: Address,
-        code: Option<&[u8]>,
+        code: Option<&'a [u8]>,
         code_hash: Option<Uint256>,
     ) -> Self {
         ExecutionMessage {
@@ -260,11 +262,11 @@ impl ExecutionMessage {
             gas,
             recipient,
             sender,
-            input: input.map(|s| s.to_vec()),
+            input,
             value,
             create2_salt,
             code_address,
-            code: code.map(|s| s.to_vec()),
+            code,
             code_hash,
         }
     }
@@ -300,8 +302,8 @@ impl ExecutionMessage {
     }
 
     /// Read the optional input message.
-    pub fn input(&self) -> Option<&Vec<u8>> {
-        self.input.as_ref()
+    pub fn input(&self) -> Option<&[u8]> {
+        self.input
     }
 
     /// Read the value of the message.
@@ -320,8 +322,8 @@ impl ExecutionMessage {
     }
 
     /// Read the optional init code.
-    pub fn code(&self) -> Option<&Vec<u8>> {
-        self.code.as_ref()
+    pub fn code(&self) -> Option<&[u8]> {
+        self.code
     }
 
     /// Read the optional code hash.
@@ -710,8 +712,8 @@ extern "C" fn release_stack_step_result(result: *const ffi::evmc_step_result) {
     }
 }
 
-impl From<&ffi::evmc_message> for ExecutionMessage {
-    fn from(message: &ffi::evmc_message) -> Self {
+impl<'a> From<&'a ffi::evmc_message> for ExecutionMessage<'a> {
+    fn from(message: &'a ffi::evmc_message) -> Self {
         ExecutionMessage {
             kind: message.kind,
             flags: message.flags,
@@ -725,7 +727,9 @@ impl From<&ffi::evmc_message> for ExecutionMessage {
             } else if message.input_size == 0 {
                 None
             } else {
-                Some(from_buf_raw::<u8>(message.input_data, message.input_size))
+                Some(unsafe {
+                    slice::from_raw_parts_mut(message.input_data as *mut u8, message.input_size)
+                })
             },
             value: message.value,
             create2_salt: message.create2_salt,
@@ -736,7 +740,9 @@ impl From<&ffi::evmc_message> for ExecutionMessage {
             } else if message.code_size == 0 {
                 None
             } else {
-                Some(from_buf_raw::<u8>(message.code, message.code_size))
+                Some(unsafe {
+                    slice::from_raw_parts_mut(message.code as *mut u8, message.code_size)
+                })
             },
             code_hash: if message.code_hash.is_null() {
                 None
