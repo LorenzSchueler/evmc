@@ -67,7 +67,7 @@ pub struct ExecutionResult {
     status_code: StatusCode,
     gas_left: i64,
     gas_refund: i64,
-    output: Option<Vec<u8>>,
+    output: Option<Box<[u8]>>,
     create_address: Option<Address>,
 }
 
@@ -79,7 +79,7 @@ pub struct StepResult {
     pc: u64,
     gas_left: i64,
     gas_refund: i64,
-    output: Option<Vec<u8>>,
+    output: Option<Box<[u8]>>,
     stack: Vec<Uint256>,
     memory: Vec<u8>,
     last_call_return_data: Option<Vec<u8>>,
@@ -119,13 +119,13 @@ impl ExecutionResult {
         _status_code: StatusCode,
         _gas_left: i64,
         _gas_refund: i64,
-        _output: Option<&[u8]>,
+        _output: Option<Box<[u8]>>,
     ) -> Self {
         ExecutionResult {
             status_code: _status_code,
             gas_left: _gas_left,
             gas_refund: _gas_refund,
-            output: _output.map(|s| s.to_vec()),
+            output: _output,
             create_address: None,
         }
     }
@@ -136,12 +136,12 @@ impl ExecutionResult {
     }
 
     /// Create a revert result.
-    pub fn revert(_gas_left: i64, _output: Option<&[u8]>) -> Self {
+    pub fn revert(_gas_left: i64, _output: Option<Box<[u8]>>) -> Self {
         ExecutionResult::new(StatusCode::EVMC_REVERT, _gas_left, 0, _output)
     }
 
     /// Create a successful result.
-    pub fn success(_gas_left: i64, _gas_refund: i64, _output: Option<&[u8]>) -> Self {
+    pub fn success(_gas_left: i64, _gas_refund: i64, _output: Option<Box<[u8]>>) -> Self {
         ExecutionResult::new(StatusCode::EVMC_SUCCESS, _gas_left, _gas_refund, _output)
     }
 
@@ -161,8 +161,8 @@ impl ExecutionResult {
     }
 
     /// Read the output returned.
-    pub fn output(&self) -> Option<&Vec<u8>> {
-        self.output.as_ref()
+    pub fn output(&self) -> Option<&[u8]> {
+        self.output.as_deref()
     }
 
     /// Read the address of the created account. This will likely be set when
@@ -180,7 +180,7 @@ impl StepResult {
         pc: u64,
         gas_left: i64,
         gas_refund: i64,
-        output: Option<Vec<u8>>,
+        output: Option<Box<[u8]>>,
         stack: Vec<Uint256>,
         memory: Vec<u8>,
         last_call_return_data: Option<Vec<u8>>,
@@ -556,18 +556,6 @@ impl<'a> ExecutionContext<'a> {
     }
 }
 
-impl From<StepResult> for ExecutionResult {
-    fn from(result: StepResult) -> Self {
-        Self {
-            status_code: result.status_code,
-            gas_left: result.gas_left,
-            gas_refund: result.gas_refund,
-            output: result.output,
-            create_address: None,
-        }
-    }
-}
-
 impl From<ffi::evmc_result> for ExecutionResult {
     fn from(result: ffi::evmc_result) -> Self {
         let ret = Self {
@@ -580,7 +568,9 @@ impl From<ffi::evmc_result> for ExecutionResult {
             } else if result.output_size == 0 {
                 None
             } else {
-                Some(from_buf_raw::<u8>(result.output_data, result.output_size))
+                Some(Box::from(unsafe {
+                    slice::from_raw_parts(result.output_data as *mut u8, result.output_size)
+                }))
             },
             // Consider it is always valid.
             create_address: Some(result.create_address),
@@ -646,7 +636,12 @@ extern "C" fn release_heap_result(result: *const ffi::evmc_result) {
 /// Returns a pointer to a stack-allocated evmc_result.
 impl From<ExecutionResult> for ffi::evmc_result {
     fn from(value: ExecutionResult) -> Self {
-        let (buffer, len) = allocate_output_data(value.output.as_ref());
+        let (buffer, len) = if let Some(buf) = value.output {
+            let len = buf.len();
+            (Box::<[u8]>::into_raw(buf) as *const u8, len)
+        } else {
+            (std::ptr::null(), 0)
+        };
         Self {
             status_code: value.status_code,
             gas_left: value.gas_left,
@@ -667,7 +662,12 @@ impl From<ExecutionResult> for ffi::evmc_result {
 /// Returns a pointer to a stack-allocated evmc_step_result.
 impl From<StepResult> for ffi::evmc_step_result {
     fn from(value: StepResult) -> Self {
-        let (output_data, output_size) = allocate_output_data(value.output.as_ref());
+        let (output_data, output_size) = if let Some(buf) = value.output {
+            let len = buf.len();
+            (Box::<[u8]>::into_raw(buf) as *const u8, len)
+        } else {
+            (std::ptr::null(), 0)
+        };
         let (stack, stack_size) = allocate_output_data(Some(&value.stack));
         let (memory, memory_size) = allocate_output_data(Some(&value.memory));
         let (last_call_return_data, last_call_return_data_size) =
@@ -753,18 +753,6 @@ impl<'a> From<&'a ffi::evmc_message> for ExecutionMessage<'a> {
     }
 }
 
-fn from_buf_raw<T>(ptr: *const T, size: usize) -> Vec<T> {
-    // Pre-allocate a vector.
-    let mut buf = Vec::with_capacity(size);
-    unsafe {
-        // Copy from the C buffer to the vec's buffer.
-        std::ptr::copy(ptr, buf.as_mut_ptr(), size);
-        // Set the len of the vec manually.
-        buf.set_len(size);
-    }
-    buf
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -823,7 +811,7 @@ mod tests {
             StatusCode::EVMC_FAILURE,
             420,
             21,
-            Some(&[0xc0, 0xff, 0xee, 0x71, 0x75]),
+            Some(Box::new([0xc0, 0xff, 0xee, 0x71, 0x75])),
         );
 
         let f: *const ffi::evmc_result = r.into();
@@ -870,7 +858,7 @@ mod tests {
             StatusCode::EVMC_FAILURE,
             420,
             21,
-            Some(&[0xc0, 0xff, 0xee, 0x71, 0x75]),
+            Some(Box::new([0xc0, 0xff, 0xee, 0x71, 0x75])),
         );
 
         let f: ffi::evmc_result = r.into();
