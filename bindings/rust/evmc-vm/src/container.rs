@@ -7,6 +7,7 @@ use crate::EvmcVm;
 use std::ops::{Deref, DerefMut};
 
 /// Container struct for EVMC instances and user-defined data.
+#[repr(C)]
 pub struct EvmcContainer<T>
 where
     T: EvmcVm + Sized,
@@ -150,7 +151,7 @@ mod tests {
             TestVm {}
         }
         fn execute(
-            &self,
+            &mut self,
             _revision: evmc_sys::evmc_revision,
             _code: &[u8],
             _message: &ExecutionMessage,
@@ -234,7 +235,7 @@ mod tests {
         let host_context = std::ptr::null_mut();
 
         let mut context = ExecutionContext::new(&host, host_context);
-        let container = EvmcContainer::<TestVm>::new(instance);
+        let mut container = EvmcContainer::<TestVm>::new(instance);
         assert_eq!(
             container
                 .execute(
@@ -250,7 +251,7 @@ mod tests {
         let ptr = unsafe { EvmcContainer::into_ffi_pointer(container) };
 
         let mut context = ExecutionContext::new(&host, host_context);
-        let container = unsafe { EvmcContainer::<TestVm>::from_ffi_pointer(ptr) };
+        let mut container = unsafe { EvmcContainer::<TestVm>::from_ffi_pointer(ptr) };
         assert_eq!(
             container
                 .execute(

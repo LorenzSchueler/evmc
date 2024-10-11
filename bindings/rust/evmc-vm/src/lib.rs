@@ -29,7 +29,7 @@ pub trait EvmcVm {
     }
     /// This is called for every incoming message.
     fn execute<'a>(
-        &self,
+        &mut self,
         revision: Revision,
         code: &'a [u8],
         message: &'a ExecutionMessage,
@@ -39,7 +39,7 @@ pub trait EvmcVm {
 
 pub trait SteppableEvmcVm {
     fn step_n<'a>(
-        &self,
+        &mut self,
         revision: Revision,
         code: &'a [u8],
         message: &'a ExecutionMessage,
